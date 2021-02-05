@@ -1,0 +1,341 @@
+#!/bin/bash
+# script to use an encrypted container
+# written for linux on a raspberry pi (rasbian)
+# MIT license (C) k theis 2/2021 
+
+# file container is /root/esafe.bin
+# name is mysafe
+# mounted location is /mnt/container
+
+# use colors for messages
+red="\033[31m"
+green="\033[32m"
+normal="\033[0m"
+
+
+# --- create a new encrypted filesystem ---
+function create {
+
+# test for existing
+if [ -f /root/esafe.bin ]; then
+	echo -e "$red Error: an encrypted filesystem already exists $normal"
+	exit 1
+fi
+
+echo -e "$green We will now create an encrypted filesystem $normal"
+echo
+
+# see if we need to add software
+if ! [ -e /usr/sbin/cryptsetup ]; then
+	echo -e "$green Installing needed software $normal"
+	sleep 2
+       	if apt-get install cryptsetup	
+	then	# install OK
+		:
+	else	# install failed
+		echo -e "$red Error: install failed. needed software not installed $normal"
+		exit 1
+	fi
+fi
+
+# create an empty file of 250MB
+echo
+echo -e "$green Creating an empty 250MB container $normal"
+echo -e "$green This may take a few minutes $normal"
+echo
+dd if=/dev/zero of=/root/esafe.bin bs=1M count=250
+
+# test for loopback devices
+if ! [ -b /dev/loop0 ]; then
+	echo -e "$red Error: loopback device /dev/loop0 not found $normal"
+	# delete empty filesystem
+	rm /root/esafe.bin
+	exit 1
+fi
+
+# create a symlink to the loopback device
+if losetup /dev/loop0 /root/esafe.bin
+then	# OK
+	:
+else	# failed
+	rm /root/esafe.bin
+	echo -e "$red Error: link creation failed $normal"
+	exit 1
+fi
+
+# create a partition of the loopback device
+echo
+echo -e "$green We will now create a partition on the encrypted filesystem. $normal"
+echo
+echo -e "$green 1. at the Command prompt, type n and press the <enter> key $normal"
+echo -e "$green 2. at the Partition type prompt, type p and press the <enter> key $normal"
+echo -e "$green 3. at the Partition number press the <enter> key $normal"
+echo -e "$green 4. at the First sector prompt press the<enter> key $normal"
+echo -e "$green 5. at the Last sector prompt press then <enter> key $normal"
+echo -e "$green 6. at the Command prompt type w and press the <enter> key $normal"
+echo -e "$green Ignore the warning about re-reading the partition table $normal"
+echo
+
+fdisk /dev/loop0
+
+# now set up dm-crypt and LUKS
+echo
+echo -e "$green Creating the encryption on the new partition $normal"
+echo -e "$green ignore the dos partition signature warnings $normal"
+echo -e "$green at the Are you sure? prompt type YES (uppercase) $normal"
+echo 
+
+if cryptsetup --verbose --verify-passphrase luksFormat /dev/loop0
+then	# OK
+	:
+else	# failed
+	echo -e "$red Error: encryption failed $normal"
+	rm /root/esafe.bin
+	exit 1
+fi
+
+# open the block device
+echo -e "$green We will now format the new partition $normal"
+echo -e "$green Enter the passphrase you entered above at the prompt $normal"
+cryptsetup luksOpen /dev/loop0 mysafe
+
+# format the new container
+echo -e "$green Formatting the new container $normal"
+if mkfs.ext4 -j /dev/mapper/mysafe
+then	# OK
+	:
+else	# failed
+	echo -e "$red Error: formatting failed $normal"
+	losetup -d /dev/loop0
+	rm /root/esafe.bin
+	exit 1
+fi
+
+# mount the new container
+if ! [ -d /mnt/container ]; then 
+if mkdir /mnt/container
+then	# OK
+	:
+else	# failed
+	losetup -f /dev/loop0
+	echo -e "$red Error: failed to create a mountpoint $normal"
+	exit 1
+	fi
+fi
+
+if mount /dev/mapper/mysafe /mnt/container
+then	# OK
+	:
+else	# failed
+	losetup -d /dev/loop0
+	echo -e "$red Error: failed to mount new container $normal"
+	exit 1
+fi
+
+# make usable for all
+chmod 757 /mnt/container
+
+# creation done
+echo -e "$green Your encrypted container is built and mounted to /mnt/container $normal"
+echo -e "$green To disable your encrypted container type 'esafe off' $normal"
+echo -e "$green To re-enable your encrypted container type 'esafe on' $normal"
+exit 0
+
+# function end
+}
+
+
+
+
+
+# --- enable and mount encrypted partition ---
+function safeon {
+# test for encrypted file system
+if ! [ -f /root/esafe.bin ]; then
+	echo -e "$red Error - no encrypted filesystem found $normal"
+	exit 1
+fi
+
+# test if mapper already setup
+if [ -e /dev/mapper/mysafe ]; then
+	echo -e "$red Error - filesystem seems to be already linked $normal"
+	exit 1
+fi
+
+# create destination if not there
+if ! [ -d /mnt/container ]; then
+	mkdir /mnt/container
+fi
+
+# set it up
+if losetup /dev/loop0 /root/esafe.bin
+then 	# looped ok
+	:
+else	# failed
+	echo -e "$red Failed to link to encrypted filesystem $normal"
+	exit 1
+fi
+
+if cryptsetup luksOpen /dev/loop0 mysafe
+then	# opened ok
+	:
+else 
+	echo -e "$red Failed to open encrypted container $normal"
+	exit 1
+fi
+
+
+# mount the file
+if mount /dev/mapper/mysafe /mnt/container
+then 
+	chmod 757 /mnt/container
+	echo -e "$green Encrypted filesystem is mounted at /mnt/container $normal"
+	echo -e "$green Type 'esafe off' to unmount the encrypted filesystem $normal"
+	exit 0
+else
+	losetup -d /dev/loop0
+	echo -e "$green error mounting to /mnt/container $normal"
+	exit 1
+fi
+}
+
+
+
+# --- turn off the container ---
+function safeoff {
+
+if umount /mnt/container
+then	# unmounted OK
+	:
+else	# failed to unmount. busy?
+	echo -e "$red failed to unmout /mnt/container $normal"
+	exit 1
+fi
+
+# remove mount point
+if rmdir /mnt/container
+then	# unmounted OK
+	:
+else	# failed to remove mount point
+	echo -e "$red Error: failed to remove mountpoint $normal"
+	exit 1
+fi
+
+# close the links, remove used ram locations
+if cryptsetup luksClose mysafe	# remove ram pointers
+then	# OK
+	:
+else	# failed
+	echo -e "$red Error: failed to remove RAM pointers $normal"
+	exit 1
+fi
+
+# disassociate /dev/loopx
+if losetup -d /dev/loop0		# disassociate loop0
+then	# OK
+	:
+else	# failed
+	echo -e "$red Error: failed to disassociate /dev/loop0 $normal"
+	exit 1
+fi
+
+# done
+echo -e "$green container unmounted $normal"
+exit 0
+
+}
+
+
+# show luks device info
+function dump {
+
+if ! [ -d /mnt/container ]; then
+	echo -e "$red Error: encrypted filesystem is not mounted $normal"
+	exit 1
+fi
+
+# show header info
+cryptsetup luksDump /dev/loop0
+exit 0
+}
+
+
+
+
+
+
+# ---- start of main program -----
+# test if user root
+
+if [ "$EUID" -ne 0 ];		# only run as root
+then 
+	echo -e "$green Please run $0 as root $normal"
+	exit 1
+fi
+
+# test command line options
+
+if [ -z $1 ]; then		# show status/usage
+	echo -e "$green Encrypted file system utilities $normal"
+	echo -e "$green usage: safe [on/off/new/dump/status/addkey/delkey/changekey] $normal"
+	if [ -d /mnt/container ]; then
+		echo -e "$green safe is ON and mounted to /mnt/container $normal"
+	else
+		echo -e "$green safe is OFF and unmounted $normal"
+	fi
+	exit 0
+fi
+
+if [ $1 = "on" ]; then		# enable and mount
+	safeon
+	exit 0
+fi
+
+if [ $1 = "off" ]; then		# disable and unmount
+	safeoff
+	exit 0
+fi
+
+if [ $1 = "new" ]; then		# create a new container
+	create
+	exit 0
+fi
+
+if [ $1 = "dump" ]; then	# show luks header info
+	dump
+	exit 0
+fi
+
+if [ $1 = "status" ]; then	# show mount status
+	echo -e "$green"
+	cryptsetup status mysafe
+	echo -e "$normal"
+	exit 0
+fi
+
+if [ $1 = "addkey" ]; then	# add a new passphrase to the filesystem
+	echo -e "$green Adding a new key "
+	cryptsetup luksAddKey /dev/loop0
+	echo -e "$normal"
+	exit 0
+fi
+
+if [ $1 = "delkey" ]; then	# delete an existing key from the filesystem
+	echo -e "$green Removing an existing key"
+	cryptsetup luksRemoveKey /dev/loop0
+	echo -e "$normal"
+	exit 0
+fi
+
+if [ $1 = "changekey" ]; then	# change an existing passphrase
+	echo -e "$green Changing an existing key"
+	cryptsetup luksChangeKey /dev/loop0
+	echo -e "$normal"
+	exit 0
+fi
+
+# all other options
+echo -e "$green Options are on, off, new, dump, status, addkey, delkey, changekey $normal"
+exit 1
+
+
