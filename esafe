@@ -1,10 +1,18 @@
 #!/bin/bash
+# esafe v1.01a 2/5/2021
 # script to use an encrypted container
 # written for linux on a raspberry pi (rasbian)
 # MIT license (C) k theis 2/2021 
 
-# file container is /root/esafe.bin
-# name is mysafe
+# file container is either the current directory or /root/esafe.bin
+# whichever is found first. This is so esafe.bin can be mounted on 
+# a local drive (flash drive) and, cd'ing to the flash drive, running 
+# esafe (from your bin directory). This will use the esafe.bin on the
+# local flash drive. If it can't be found, it will use the default
+# located in /root. 
+# This also lets you keep multiple encrypted files, ie one per directory.
+
+# name of the linked device is mysafe
 # mounted location is /mnt/container
 
 # use colors for messages
@@ -43,6 +51,9 @@ echo
 echo -e "$green Creating an empty 250MB container $normal"
 echo -e "$green This may take a few minutes $normal"
 echo
+
+# if you want a filesystem size other than 250MB, change the count
+# to equal the MB size you want. ie: count=100 is a 100MB filesystem.
 dd if=/dev/zero of=/root/esafe.bin bs=1M count=250
 
 # test for loopback devices
@@ -151,10 +162,22 @@ exit 0
 # --- enable and mount encrypted partition ---
 function safeon {
 # test for encrypted file system
-if ! [ -f /root/esafe.bin ]; then
+MYSAFE="NULL"
+
+if  [ -f ./esafe.bin ]; then
+	MYSAFE="./esafe.bin"
+else
+	if [ -f /root/esafe.bin ]; then
+		MYSAFE="/root/esafe.bin"
+	fi
+fi
+
+if [ $MYSAFE = "NULL" ]; then
 	echo -e "$red Error - no encrypted filesystem found $normal"
 	exit 1
 fi
+
+echo "Using esafe at $MYSAFE"
 
 # test if mapper already setup
 if [ -e /dev/mapper/mysafe ]; then
@@ -168,7 +191,7 @@ if ! [ -d /mnt/container ]; then
 fi
 
 # set it up
-if losetup /dev/loop0 /root/esafe.bin
+if losetup /dev/loop0 $MYSAFE
 then 	# looped ok
 	:
 else	# failed
@@ -203,6 +226,11 @@ fi
 
 # --- turn off the container ---
 function safeoff {
+
+sync
+sleep 1
+sync
+sleep 1
 
 if umount /mnt/container
 then	# unmounted OK
@@ -277,7 +305,7 @@ fi
 
 if [ -z $1 ]; then		# show status/usage
 	echo -e "$green Encrypted file system utilities $normal"
-	echo -e "$green usage: safe [on/off/new/dump/status/addkey/delkey/changekey] $normal"
+	echo -e "$green usage: $0 [on/off/new/dump/status/addkey/delkey/changekey] $normal"
 	if [ -d /mnt/container ]; then
 		echo -e "$green safe is ON and mounted to /mnt/container $normal"
 	else
