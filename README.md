@@ -1,5 +1,5 @@
 esafe is a bash script to create, mount, unmount and manipulate 
-an encrypted filesystem using the cryptsetup program using the luks
+an encrypted filesystem using the cryptsetup program and the luks
 linux kernel extentions.
 
 I find it useful, but there are no guarantees as to its usefulness.
