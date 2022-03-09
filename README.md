@@ -49,5 +49,14 @@ you can manually install the cryptsetup programs.
 Once the file /root/esafe.bin is fully created it can be copied
 as a backup. It can be kept on a usb flash drive.
 
+NORMAL USE
+With the esafe script in /usr/local/bin:
+sudo su -   (become root)
+esafe on    (start script, enter password used when created)
+copy files to/from /mnt/container
+esafe off   (done. unload container)
+exit        (back to being a normal user)
+
+While there are other ways to do this, this is probably the easiest.
 
 
