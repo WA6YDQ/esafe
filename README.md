@@ -49,6 +49,33 @@ you can manually install the cryptsetup programs.
 Once the file /root/esafe.bin is fully created it can be copied
 as a backup. It can be kept on a usb flash drive.
 
+---NOTE---
+
+Ubuntu has started (and maybe others) using /dev/loop0-25 for their own uses.
+
+esafe by default uses /dev/loop0
+
+You WILL need to change the /dev/loop0 devices in esafe to /dev/loopNN for esafe
+to run correctly. Best way to do this is find the first unused device in /dev (in my 
+case it was /dev/loop26) and create it:
+
+sudo su - (change your user to root)
+
+cd /dev
+
+mknod /dev/loop26 b 7 26
+
+chmod 660 /dev/loop26
+
+then ls -la /dev/loop*
+
+The new node should be the same permissions wise as the others.
+
+You can (after changing /devloop0 to /dev/loop26 in esafe) then
+create a new container by running esafe new.
+
+---NOTE---
+
 NORMAL USE
 
 With the esafe script in /usr/local/bin:
